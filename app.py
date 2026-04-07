@@ -58,7 +58,7 @@ with st.sidebar:
     st.subheader(f"Financials: {active_date_str}")
     
     new_tax = st.number_input("Tax Rate (%)", min_value=0.0, step=0.1, value=tax_rate)
-    new_pay = st.number_input("Payment Received ($)", min_value=0.0, step=1.0, value=pay_received)
+    new_pay = st.number_input("Payment Received (Rs )", min_value=0.0, step=1.0, value=pay_received)
     
     if st.button("💾 Save Date Settings"):
         run_query("UPDATE daily_finance SET tax_rate=?, payment_received=? WHERE date=?", (new_tax, new_pay, active_date_str))
@@ -79,7 +79,7 @@ with st.expander("📝 Add / Edit Product Details", expanded=True):
     with c2:
         qty = st.number_input("Quantity", min_value=1, value=current_item[1] if current_item else 1)
     with c3:
-        rate = st.number_input("Rate ($)", min_value=0.0, value=current_item[2] if current_item else 0.0)
+        rate = st.number_input("Rate (Rs )", min_value=0.0, value=current_item[2] if current_item else 0.0)
 
     btn_col1, btn_col2 = st.columns([1, 5])
     if btn_col1.button("Update" if edit_id else "Add Item", type="primary"):
@@ -121,8 +121,8 @@ if all_items:
             c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 1.5])
             c1.write(row['description'])
             c2.write(str(row['quantity']))
-            c3.write(f"${row['rate']:,.2f}")
-            c4.write(f"${row['amount']:,.2f}")
+            c3.write(f"Rs {row['rate']:,.2f}")
+            c4.write(f"Rs {row['amount']:,.2f}")
             
             e_btn, d_btn = c5.columns(2)
             if e_btn.button("✏️", key=f"e_{row['id']}"):
@@ -142,19 +142,19 @@ if all_items:
         export_dues.append({"Date": d_str, "Subtotal": day_subtotal, "Tax %": day_tax_rate, "Total Billed": day_total, "Paid": day_paid, "Pending": day_total - day_paid})
 
         s1, s2, s3, s4 = st.columns(4)
-        s1.write(f"**Subtotal:** ${day_subtotal:,.2f}")
-        s2.write(f"**Tax ({day_tax_rate}%):** ${tax_val:,.2f}")
-        s3.write(f"**Paid:** ${day_paid:,.2f}")
-        s4.markdown(f"**Pending:** :red[${day_total - day_paid:,.2f}]")
+        s1.write(f"**Subtotal:** Rs {day_subtotal:,.2f}")
+        s2.write(f"**Tax ({day_tax_rate}%):** Rs {tax_val:,.2f}")
+        s3.write(f"**Paid:** Rs {day_paid:,.2f}")
+        s4.markdown(f"**Pending:** :red[Rs {day_total - day_paid:,.2f}]")
         st.divider()
 
 # --- 4. Totals & Multi-Sheet Export ---
 if export_ledger:
     st.subheader("🏁 Grand Summary")
     g1, g2, g3 = st.columns(3)
-    g1.metric("Total Billed", f"${grand_total_billed:,.2f}")
-    g2.metric("Total Received", f"${grand_total_paid:,.2f}")
-    g3.metric("Outstanding", f"${grand_total_billed - grand_total_paid:,.2f}")
+    g1.metric("Total Billed", f"Rs {grand_total_billed:,.2f}")
+    g2.metric("Total Received", f"Rs {grand_total_paid:,.2f}")
+    g3.metric("Outstanding", f"Rs {grand_total_billed - grand_total_paid:,.2f}")
 
     def to_excel():
         output = BytesIO()

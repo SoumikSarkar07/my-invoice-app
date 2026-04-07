@@ -3,16 +3,15 @@ import pandas as pd
 from io import BytesIO
 from datetime import date
 
-st.set_page_config(page_title="Ultimate Ledger", layout="wide")
+st.set_page_config(page_title="Professional Ledger", layout="wide")
 
-st.title("📑 Business Ledger & Debt Tracker")
-st.write("Manage products by date, apply tax, and track payments received.")
+st.title("📑 Business Ledger & Multi-Sheet Exporter")
 
 # --- Session State Initialization ---
 if 'data_by_date' not in st.session_state:
     st.session_state.data_by_date = {}
 if 'editing_key' not in st.session_state:
-    st.session_state.editing_key = None # Format: (date_str, index)
+    st.session_state.editing_key = None 
 
 # --- 1. Sidebar: Date & Financial Settings ---
 with st.sidebar:
@@ -20,7 +19,6 @@ with st.sidebar:
     active_date = st.date_input("Select Working Date", value=date.today())
     active_date_str = active_date.strftime("%Y-%m-%d")
     
-    # Initialize the date in dictionary if new
     if active_date_str not in st.session_state.data_by_date:
         st.session_state.data_by_date[active_date_str] = {
             "items": [],
@@ -31,7 +29,6 @@ with st.sidebar:
     st.divider()
     st.subheader(f"Financials: {active_date_str}")
     
-    # Global settings for the active date
     st.session_state.data_by_date[active_date_str]["tax_rate"] = st.number_input(
         "Tax Rate (%)", min_value=0.0, step=0.1, 
         value=st.session_state.data_by_date[active_date_str]["tax_rate"],
@@ -47,7 +44,6 @@ with st.sidebar:
 # --- 2. Input Form (Add / Update) ---
 edit_info = st.session_state.editing_key
 current_item = None
-# Check if we are currently editing an item on the ACTIVE date
 if edit_info and edit_info[0] == active_date_str:
     current_item = st.session_state.data_by_date[active_date_str]["items"][edit_info[1]]
 
@@ -75,21 +71,20 @@ with st.expander("📝 Add / Edit Product Details", expanded=True):
         st.session_state.editing_key = None
         st.rerun()
 
-# --- 3. Management Table & Daily Totals ---
+# --- 3. Data Display & Calculations ---
 st.divider()
 grand_total_billed = 0
 grand_total_paid = 0
-export_list = []
+export_items = []
+export_dues = []
 
 if st.session_state.data_by_date:
-    # Sort dates to show newest first
     for d_str in sorted(st.session_state.data_by_date.keys(), reverse=True):
         day_data = st.session_state.data_by_date[d_str]
         if not day_data["items"]: continue
         
-        st.subheader(f"📅 Date: {d_str}")
+        st.subheader(f"🗓️ Date: {d_str}")
         
-        # Table Header
         h1, h2, h3, h4, h5 = st.columns([3, 1, 1, 1, 1.5])
         h1.write("**Item**")
         h2.write("**Qty**")
@@ -106,7 +101,6 @@ if st.session_state.data_by_date:
             c3.write(f"Rs {item['Rate']:,.2f}")
             c4.write(f"Rs {item['Amount']:,.2f}")
             
-            # Edit/Delete Buttons
             edit_btn, del_btn = c5.columns(2)
             if edit_btn.button("✏️", key=f"edit_{d_str}_{i}"):
                 st.session_state.editing_key = (d_str, i)
@@ -115,48 +109,62 @@ if st.session_state.data_by_date:
                 st.session_state.data_by_date[d_str]["items"].pop(i)
                 st.rerun()
 
-            # Prep for Export
-            row = item.copy()
-            row.update({"Date": d_str, "Tax %": day_data["tax_rate"], "Paid": day_data["payment_received"]})
-            export_list.append(row)
+            # Itemized List for Excel
+            item_row = item.copy()
+            item_row["Date"] = d_str
+            export_items.append(item_row)
 
-        # Day Summary
+        # Day Financials
         tax_val = day_subtotal * (day_data["tax_rate"] / 100)
         day_total = day_subtotal + tax_val
-        day_pending = day_total - day_data["payment_received"]
+        day_paid = day_data["payment_received"]
+        day_pending = day_total - day_paid
         
         grand_total_billed += day_total
-        grand_total_paid += day_data["payment_received"]
+        grand_total_paid += day_paid
 
-        # Financial Summary for the day
+        # Dues Summary for Excel
+        export_dues.append({
+            "Date": d_str,
+            "Subtotal": day_subtotal,
+            "Tax (%)": day_data["tax_rate"],
+            "Tax Amount": tax_val,
+            "Total Billed": day_total,
+            "Amount Paid": day_paid,
+            "Pending Due": day_pending
+        })
+
         s1, s2, s3, s4 = st.columns(4)
         s1.write(f"**Subtotal:** Rs {day_subtotal:,.2f}")
         s2.write(f"**Tax ({day_data['tax_rate']}%):** Rs {tax_val:,.2f}")
-        s3.write(f"**Paid:** Rs {day_data['payment_received']:,.2f}")
+        s3.write(f"**Paid:** Rs {day_paid:,.2f}")
         s4.markdown(f"**Pending:** :red[Rs {day_pending:,.2f}]")
         st.divider()
 
-# --- 4. Grand Totals & Export ---
-if export_list:
-    st.subheader("🏁 Overall Summary (All Dates)")
+# --- 4. Grand Summary & Multi-Sheet Export ---
+if export_items:
+    st.subheader("🏁 Overall Business Summary")
     g1, g2, g3 = st.columns(3)
     g1.metric("Total Billed", f"Rs {grand_total_billed:,.2f}")
     g2.metric("Total Received", f"Rs {grand_total_paid:,.2f}")
     g3.metric("Total Outstanding", f"Rs {grand_total_billed - grand_total_paid:,.2f}")
 
     def get_excel_file():
-        df = pd.DataFrame(export_list)
+        df_ledger = pd.DataFrame(export_items)[['Date', 'Description', 'Quantity', 'Rate', 'Amount']]
+        df_dues = pd.DataFrame(export_dues)
+        
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Business_Ledger')
+            # Sheet 1: Itemized Ledger
+            df_ledger.to_excel(writer, index=False, sheet_name='Itemized_Ledger')
+            # Sheet 2: Dues Summary
+            df_dues.to_excel(writer, index=False, sheet_name='Dues_Summary')
         return output.getvalue()
 
     st.download_button(
-        "📥 Download Consolidated Excel Report",
+        "📥 Download Multi-Sheet Excel Report",
         data=get_excel_file(),
-        file_name=f"Ledger_{date.today()}.xlsx",
+        file_name=f"Ledger_Report_{date.today()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-else:
-    st.info("No entries found. Select a date and add your first product!")

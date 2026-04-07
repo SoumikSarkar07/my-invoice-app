@@ -74,8 +74,8 @@ if st.session_state.data_by_date:
             c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 1])
             c1.write(item['Description'])
             c2.write(str(item['Quantity']))
-            c3.write(f"${item['Rate']:,.2f}")
-            c4.write(f"${item['Amount']:,.2f}")
+            c3.write(f"Rs {item['Rate']:,.2f}")
+            c4.write(f"Rs {item['Amount']:,.2f}")
             
             # Action Buttons
             with c5:
@@ -106,9 +106,9 @@ if st.session_state.data_by_date:
         grand_total = subtotal + tax_val
 
     with col_res:
-        st.write(f"**Overall Subtotal:** ${subtotal:,.2f}")
-        st.write(f"**Tax Amount ({tax_perc}%):** ${tax_val:,.2f}")
-        st.subheader(f"Grand Total: ${grand_total:,.2f}")
+        st.write(f"**Overall Subtotal:** Rs {subtotal:,.2f}")
+        st.write(f"**Tax Amount ({tax_perc}%):** Rs {tax_val:,.2f}")
+        st.subheader(f"Grand Total: Rs {grand_total:,.2f}")
 
     # --- 4. Export to Excel ---
     def to_excel(df, sub, t_val, g_total):

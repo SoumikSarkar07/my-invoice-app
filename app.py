@@ -61,8 +61,8 @@ if st.session_state.product_list:
         c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 1])
         c1.write(item['Description'])
         c2.write(str(item['Quantity']))
-        c3.write(f"${item['Rate']:,.2f}")
-        c4.write(f"${item['Amount']:,.2f}")
+        c3.write(f"Rs{item['Rate']:,.2f}")
+        c4.write(f"Rs{item['Amount']:,.2f}")
         
         # Action buttons
         with c5:
@@ -86,9 +86,9 @@ if st.session_state.product_list:
         grand_total = subtotal + tax_val
     
     with col_b:
-        st.write(f"**Subtotal:** ${subtotal:,.2f}")
-        st.write(f"**Tax Amount:** ${tax_val:,.2f}")
-        st.markdown(f"### Grand Total: ${grand_total:,.2f}")
+        st.write(f"**Subtotal:** Rs{subtotal:,.2f}")
+        st.write(f"**Tax Amount:** Rs{tax_val:,.2f}")
+        st.markdown(f"### Grand Total: Rs{grand_total:,.2f}")
 
     # --- 4. Export ---
     summary_data = [

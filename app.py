@@ -1,22 +1,30 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+from datetime import date
 
-st.set_page_config(page_title="Product Manager", layout="wide")
+st.set_page_config(page_title="Multi-Date Product Manager", layout="wide")
 
-st.title("📦 Product Manager & Exporter")
+st.title("📦 Print-O-Pack")
 
-# Initialize session state
-if 'product_list' not in st.session_state:
-    st.session_state.product_list = []
-if 'editing_index' not in st.session_state:
-    st.session_state.editing_index = None
+# Initialize session state for grouping by date
+if 'data_by_date' not in st.session_state:
+    st.session_state.data_by_date = {}
+if 'editing_key' not in st.session_state:
+    st.session_state.editing_key = None # (date, index)
 
-# --- 1. Entry/Edit Form ---
-with st.expander("📝 Product Details", expanded=True):
-    # Determine if we are editing or adding new
-    idx = st.session_state.editing_index
-    current_item = st.session_state.product_list[idx] if idx is not None else None
+# --- 1. Date & Product Entry Section ---
+with st.sidebar:
+    st.header("📅 Select Date")
+    active_date = st.date_input("Working Date", value=date.today())
+    active_date_str = active_date.strftime("%Y-%m-%d")
+
+with st.expander(f"📝 Add Product for {active_date_str}", expanded=True):
+    # Check if we are editing an existing entry
+    edit_info = st.session_state.editing_key
+    current_item = None
+    if edit_info and edit_info[0] == active_date_str:
+        current_item = st.session_state.data_by_date[active_date_str][edit_info[1]]
 
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
@@ -26,90 +34,104 @@ with st.expander("📝 Product Details", expanded=True):
     with col3:
         rate = st.number_input("Rate", min_value=0.0, step=0.01, value=current_item['Rate'] if current_item else 0.0)
 
-    btn_label = "Update Product" if idx is not None else "Add to List"
+    btn_label = "Update Product" if edit_info else "Add to Date"
     if st.button(btn_label, type="primary"):
         if desc:
-            new_data = {"Description": desc, "Quantity": qty, "Rate": rate, "Amount": qty * rate}
-            if idx is not None:
-                st.session_state.product_list[idx] = new_data
-                st.session_state.editing_index = None # Reset editing mode
+            new_entry = {"Description": desc, "Quantity": qty, "Rate": rate, "Amount": qty * rate}
+            
+            if active_date_str not in st.session_state.data_by_date:
+                st.session_state.data_by_date[active_date_str] = []
+            
+            if edit_info:
+                st.session_state.data_by_date[active_date_str][edit_info[1]] = new_entry
+                st.session_state.editing_key = None
             else:
-                st.session_state.product_list.append(new_data)
+                st.session_state.data_by_date[active_date_str].append(new_entry)
             st.rerun()
-        else:
-            st.error("Description is required")
 
-    if idx is not None:
+    if edit_info:
         if st.button("Cancel Edit"):
-            st.session_state.editing_index = None
+            st.session_state.editing_key = None
             st.rerun()
 
-# --- 2. Management Table ---
-if st.session_state.product_list:
-    st.subheader("Manage Entries")
+# --- 2. Data Display & Management ---
+if st.session_state.data_by_date:
+    all_rows = []
     
-    # Create header row
-    h1, h2, h3, h4, h5 = st.columns([3, 1, 1, 1, 1])
-    h1.write("**Description**")
-    h2.write("**Qty**")
-    h3.write("**Rate**")
-    h4.write("**Total**")
-    h5.write("**Actions**")
-
-    # Display items with Edit/Delete buttons
-    for i, item in enumerate(st.session_state.product_list):
-        c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 1])
-        c1.write(item['Description'])
-        c2.write(str(item['Quantity']))
-        c3.write(f"Rs {item['Rate']:,.2f}")
-        c4.write(f"Rs {item['Amount']:,.2f}")
+    # Flatten the dictionary for display and export
+    for d_str, items in sorted(st.session_state.data_by_date.items()):
+        st.markdown(f"### 🗓️ Date: {d_str}")
         
-        # Action buttons
-        with c5:
-            edit_col, del_col = st.columns(2)
-            if edit_col.button("✏️", key=f"edit_{i}"):
-                st.session_state.editing_index = i
-                st.rerun()
-            if del_col.button("🗑️", key=f"del_{i}"):
-                st.session_state.product_list.pop(i)
-                st.rerun()
+        # Display header
+        h1, h2, h3, h4, h5 = st.columns([3, 1, 1, 1, 1])
+        h1.write("**Description**")
+        h2.write("**Qty**")
+        h3.write("**Rate**")
+        h4.write("**Total**")
+        h5.write("**Actions**")
 
-    # --- 3. Totals & Tax ---
-    st.divider()
-    df = pd.DataFrame(st.session_state.product_list)
-    subtotal = df['Amount'].sum()
-    
-    col_a, col_b = st.columns(2)
-    with col_a:
-        tax_perc = st.number_input("Grand Total Tax (%)", min_value=0.0, step=0.1, value=0.0)
+        for i, item in enumerate(items):
+            c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 1])
+            c1.write(item['Description'])
+            c2.write(str(item['Quantity']))
+            c3.write(f"${item['Rate']:,.2f}")
+            c4.write(f"${item['Amount']:,.2f}")
+            
+            # Action Buttons
+            with c5:
+                e_col, d_col = st.columns(2)
+                if e_col.button("✏️", key=f"edit_{d_str}_{i}"):
+                    st.session_state.editing_key = (d_str, i)
+                    st.rerun()
+                if d_col.button("🗑️", key=f"del_{d_str}_{i}"):
+                    st.session_state.data_by_date[d_str].pop(i)
+                    if not st.session_state.data_by_date[d_str]:
+                        del st.session_state.data_by_date[d_str]
+                    st.rerun()
+            
+            # Prepare for export dataframe
+            export_row = item.copy()
+            export_row['Date'] = d_str
+            all_rows.append(export_row)
+        st.divider()
+
+    # --- 3. Global Totals & Tax ---
+    df_main = pd.DataFrame(all_rows)
+    subtotal = df_main['Amount'].sum()
+
+    col_tax, col_res = st.columns(2)
+    with col_tax:
+        tax_perc = st.number_input("Apply Tax to Grand Total (%)", min_value=0.0, step=0.1)
         tax_val = subtotal * (tax_perc / 100)
         grand_total = subtotal + tax_val
-    
-    with col_b:
-        st.write(f"**Subtotal:** Rs {subtotal:,.2f}")
-        st.write(f"**Tax Amount:** Rs {tax_val:,.2f}")
-        st.markdown(f"### Grand Total: Rs {grand_total:,.2f}")
 
-    # --- 4. Export ---
-    summary_data = [
-        {"Description": "SUBTOTAL", "Amount": subtotal},
-        {"Description": f"TAX ({tax_perc}%)", "Amount": tax_val},
-        {"Description": "GRAND TOTAL", "Amount": grand_total},
-    ]
-    df_export = pd.concat([df, pd.DataFrame(summary_data)], ignore_index=True)
+    with col_res:
+        st.write(f"**Overall Subtotal:** ${subtotal:,.2f}")
+        st.write(f"**Tax Amount ({tax_perc}%):** ${tax_val:,.2f}")
+        st.subheader(f"Grand Total: ${grand_total:,.2f}")
 
-    def to_excel(df):
+    # --- 4. Export to Excel ---
+    def to_excel(df, sub, t_val, g_total):
+        # Sort by date for the Excel sheet
+        df = df[['Date', 'Description', 'Quantity', 'Rate', 'Amount']]
+        summary = pd.DataFrame([
+            {"Date": "", "Description": "SUBTOTAL", "Amount": sub},
+            {"Date": "", "Description": f"TAX ({tax_perc}%)", "Amount": t_val},
+            {"Date": "", "Description": "GRAND TOTAL", "Amount": g_total}
+        ])
+        final_df = pd.concat([df, summary], ignore_index=True)
+        
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Invoice')
+            final_df.to_excel(writer, index=False, sheet_name='Monthly Export')
         return output.getvalue()
 
     st.download_button(
-        label="📥 Export to Excel",
-        data=to_excel(df_export),
-        file_name="invoice.xlsx",
+        label="📥 Download Consolidated Excel",
+        data=to_excel(df_main, subtotal, tax_val, grand_total),
+        file_name=f"inventory_report_{date.today()}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
 else:
-    st.info("List is empty. Use the form above to add products.")
+    st.info("Start by selecting a date in the sidebar and adding products.")

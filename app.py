@@ -1,17 +1,43 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 from io import BytesIO
 from datetime import date
 
-st.set_page_config(page_title="Professional Ledger", layout="wide")
+# --- Database Setup ---
+def init_db():
+    conn = sqlite3.connect('ledger.db')
+    c = conn.cursor()
+    # Table for individual products
+    c.execute('''CREATE TABLE IF NOT EXISTS items 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                  date TEXT, description TEXT, quantity INTEGER, rate REAL, amount REAL)''')
+    # Table for daily financial settings (tax and payments)
+    c.execute('''CREATE TABLE IF NOT EXISTS daily_finance 
+                 (date TEXT PRIMARY KEY, tax_rate REAL, payment_received REAL)''')
+    conn.commit()
+    conn.close()
 
-st.title("📑 Business Ledger & Multi-Sheet Exporter")
+def run_query(query, params=(), fetch=False):
+    conn = sqlite3.connect('ledger.db')
+    c = conn.cursor()
+    c.execute(query, params)
+    data = None
+    if fetch:
+        data = c.fetchall()
+    conn.commit()
+    conn.close()
+    return data
 
-# --- Session State Initialization ---
-if 'data_by_date' not in st.session_state:
-    st.session_state.data_by_date = {}
-if 'editing_key' not in st.session_state:
-    st.session_state.editing_key = None 
+init_db()
+
+st.set_page_config(page_title="Database Ledger", layout="wide")
+st.title("🗄️ Persistent Business Ledger")
+st.write("Data is saved to `ledger.db` and persists across sessions.")
+
+# --- Session State for Editing ---
+if 'editing_id' not in st.session_state:
+    st.session_state.editing_id = None
 
 # --- 1. Sidebar: Date & Financial Settings ---
 with st.sidebar:
@@ -19,152 +45,122 @@ with st.sidebar:
     active_date = st.date_input("Select Working Date", value=date.today())
     active_date_str = active_date.strftime("%Y-%m-%d")
     
-    if active_date_str not in st.session_state.data_by_date:
-        st.session_state.data_by_date[active_date_str] = {
-            "items": [],
-            "tax_rate": 0.0,
-            "payment_received": 0.0
-        }
+    # Fetch existing finance data for this date
+    finance_data = run_query("SELECT tax_rate, payment_received FROM daily_finance WHERE date=?", (active_date_str,), fetch=True)
     
+    if not finance_data:
+        run_query("INSERT INTO daily_finance (date, tax_rate, payment_received) VALUES (?, ?, ?)", (active_date_str, 0.0, 0.0))
+        tax_rate, pay_received = 0.0, 0.0
+    else:
+        tax_rate, pay_received = finance_data[0]
+
     st.divider()
     st.subheader(f"Financials: {active_date_str}")
     
-    st.session_state.data_by_date[active_date_str]["tax_rate"] = st.number_input(
-        "Tax Rate (%)", min_value=0.0, step=0.1, 
-        value=st.session_state.data_by_date[active_date_str]["tax_rate"],
-        key=f"tax_{active_date_str}"
-    )
+    new_tax = st.number_input("Tax Rate (%)", min_value=0.0, step=0.1, value=tax_rate)
+    new_pay = st.number_input("Payment Received ($)", min_value=0.0, step=1.0, value=pay_received)
     
-    st.session_state.data_by_date[active_date_str]["payment_received"] = st.number_input(
-        "Payment Received (Rs )", min_value=0.0, step=1.0, 
-        value=st.session_state.data_by_date[active_date_str]["payment_received"],
-        key=f"pay_{active_date_str}"
-    )
+    if st.button("💾 Save Date Settings"):
+        run_query("UPDATE daily_finance SET tax_rate=?, payment_received=? WHERE date=?", (new_tax, new_pay, active_date_str))
+        st.success("Settings Saved!")
+        st.rerun()
 
 # --- 2. Input Form (Add / Update) ---
-edit_info = st.session_state.editing_key
+edit_id = st.session_state.editing_id
 current_item = None
-if edit_info and edit_info[0] == active_date_str:
-    current_item = st.session_state.data_by_date[active_date_str]["items"][edit_info[1]]
+if edit_id:
+    res = run_query("SELECT description, quantity, rate FROM items WHERE id=?", (edit_id,), fetch=True)
+    if res: current_item = res[0]
 
 with st.expander("📝 Add / Edit Product Details", expanded=True):
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        desc = st.text_input("Product Description", value=current_item['Description'] if current_item else "")
+        desc = st.text_input("Product Description", value=current_item[0] if current_item else "")
     with c2:
-        qty = st.number_input("Quantity", min_value=1, value=current_item['Quantity'] if current_item else 1)
+        qty = st.number_input("Quantity", min_value=1, value=current_item[1] if current_item else 1)
     with c3:
-        rate = st.number_input("Rate (Rs )", min_value=0.0, value=current_item['Rate'] if current_item else 0.0)
+        rate = st.number_input("Rate ($)", min_value=0.0, value=current_item[2] if current_item else 0.0)
 
     btn_col1, btn_col2 = st.columns([1, 5])
-    if btn_col1.button("Update" if edit_info else "Add Item", type="primary"):
+    if btn_col1.button("Update" if edit_id else "Add Item", type="primary"):
         if desc:
-            new_entry = {"Description": desc, "Quantity": qty, "Rate": rate, "Amount": qty * rate}
-            if edit_info:
-                st.session_state.data_by_date[active_date_str]["items"][edit_info[1]] = new_entry
-                st.session_state.editing_key = None
+            amount = qty * rate
+            if edit_id:
+                run_query("UPDATE items SET description=?, quantity=?, rate=?, amount=? WHERE id=?", (desc, qty, rate, amount, edit_id))
+                st.session_state.editing_id = None
             else:
-                st.session_state.data_by_date[active_date_str]["items"].append(new_entry)
+                run_query("INSERT INTO items (date, description, quantity, rate, amount) VALUES (?, ?, ?, ?, ?)", (active_date_str, desc, qty, rate, amount))
             st.rerun()
     
-    if edit_info and btn_col2.button("Cancel Edit"):
-        st.session_state.editing_key = None
+    if edit_id and btn_col2.button("Cancel Edit"):
+        st.session_state.editing_id = None
         st.rerun()
 
 # --- 3. Data Display & Calculations ---
 st.divider()
-grand_total_billed = 0
-grand_total_paid = 0
-export_items = []
-export_dues = []
+all_items = run_query("SELECT id, date, description, quantity, rate, amount FROM items ORDER BY date DESC", fetch=True)
+finance_map = {row[0]: (row[1], row[2]) for row in run_query("SELECT date, tax_rate, payment_received FROM daily_finance", fetch=True)}
 
-if st.session_state.data_by_date:
-    for d_str in sorted(st.session_state.data_by_date.keys(), reverse=True):
-        day_data = st.session_state.data_by_date[d_str]
-        if not day_data["items"]: continue
+grand_total_billed, grand_total_paid = 0, 0
+export_ledger, export_dues = [], []
+
+if all_items:
+    df_all = pd.DataFrame(all_items, columns=['id', 'date', 'description', 'quantity', 'rate', 'amount'])
+    
+    for d_str in df_all['date'].unique():
+        day_df = df_all[df_all['date'] == d_str]
+        day_tax_rate, day_paid = finance_map.get(d_str, (0.0, 0.0))
         
         st.subheader(f"🗓️ Date: {d_str}")
-        
         h1, h2, h3, h4, h5 = st.columns([3, 1, 1, 1, 1.5])
-        h1.write("**Item**")
-        h2.write("**Qty**")
-        h3.write("**Rate**")
-        h4.write("**Total**")
-        h5.write("**Actions**")
+        h1.write("**Item**"); h2.write("**Qty**"); h3.write("**Rate**"); h4.write("**Total**"); h5.write("**Actions**")
 
         day_subtotal = 0
-        for i, item in enumerate(day_data["items"]):
-            day_subtotal += item["Amount"]
+        for _, row in day_df.iterrows():
+            day_subtotal += row['amount']
             c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 1.5])
-            c1.write(item["Description"])
-            c2.write(str(item["Quantity"]))
-            c3.write(f"Rs {item['Rate']:,.2f}")
-            c4.write(f"Rs {item['Amount']:,.2f}")
+            c1.write(row['description'])
+            c2.write(str(row['quantity']))
+            c3.write(f"${row['rate']:,.2f}")
+            c4.write(f"${row['amount']:,.2f}")
             
-            edit_btn, del_btn = c5.columns(2)
-            if edit_btn.button("✏️", key=f"edit_{d_str}_{i}"):
-                st.session_state.editing_key = (d_str, i)
+            e_btn, d_btn = c5.columns(2)
+            if e_btn.button("✏️", key=f"e_{row['id']}"):
+                st.session_state.editing_id = row['id']
                 st.rerun()
-            if del_btn.button("🗑️", key=f"del_{d_str}_{i}"):
-                st.session_state.data_by_date[d_str]["items"].pop(i)
+            if d_btn.button("🗑️", key=f"d_{row['id']}"):
+                run_query("DELETE FROM items WHERE id=?", (row['id'],))
                 st.rerun()
 
-            # Itemized List for Excel
-            item_row = item.copy()
-            item_row["Date"] = d_str
-            export_items.append(item_row)
+            export_ledger.append({"Date": d_str, "Item": row['description'], "Qty": row['quantity'], "Rate": row['rate'], "Total": row['amount']})
 
-        # Day Financials
-        tax_val = day_subtotal * (day_data["tax_rate"] / 100)
+        tax_val = day_subtotal * (day_tax_rate / 100)
         day_total = day_subtotal + tax_val
-        day_paid = day_data["payment_received"]
-        day_pending = day_total - day_paid
-        
         grand_total_billed += day_total
         grand_total_paid += day_paid
-
-        # Dues Summary for Excel
-        export_dues.append({
-            "Date": d_str,
-            "Subtotal": day_subtotal,
-            "Tax (%)": day_data["tax_rate"],
-            "Tax Amount": tax_val,
-            "Total Billed": day_total,
-            "Amount Paid": day_paid,
-            "Pending Due": day_pending
-        })
+        
+        export_dues.append({"Date": d_str, "Subtotal": day_subtotal, "Tax %": day_tax_rate, "Total Billed": day_total, "Paid": day_paid, "Pending": day_total - day_paid})
 
         s1, s2, s3, s4 = st.columns(4)
-        s1.write(f"**Subtotal:** Rs {day_subtotal:,.2f}")
-        s2.write(f"**Tax ({day_data['tax_rate']}%):** Rs {tax_val:,.2f}")
-        s3.write(f"**Paid:** Rs {day_paid:,.2f}")
-        s4.markdown(f"**Pending:** :red[Rs {day_pending:,.2f}]")
+        s1.write(f"**Subtotal:** ${day_subtotal:,.2f}")
+        s2.write(f"**Tax ({day_tax_rate}%):** ${tax_val:,.2f}")
+        s3.write(f"**Paid:** ${day_paid:,.2f}")
+        s4.markdown(f"**Pending:** :red[${day_total - day_paid:,.2f}]")
         st.divider()
 
-# --- 4. Grand Summary & Multi-Sheet Export ---
-if export_items:
-    st.subheader("🏁 Overall Business Summary")
+# --- 4. Totals & Multi-Sheet Export ---
+if export_ledger:
+    st.subheader("🏁 Grand Summary")
     g1, g2, g3 = st.columns(3)
-    g1.metric("Total Billed", f"Rs {grand_total_billed:,.2f}")
-    g2.metric("Total Received", f"Rs {grand_total_paid:,.2f}")
-    g3.metric("Total Outstanding", f"Rs {grand_total_billed - grand_total_paid:,.2f}")
+    g1.metric("Total Billed", f"${grand_total_billed:,.2f}")
+    g2.metric("Total Received", f"${grand_total_paid:,.2f}")
+    g3.metric("Outstanding", f"${grand_total_billed - grand_total_paid:,.2f}")
 
-    def get_excel_file():
-        df_ledger = pd.DataFrame(export_items)[['Date', 'Description', 'Quantity', 'Rate', 'Amount']]
-        df_dues = pd.DataFrame(export_dues)
-        
+    def to_excel():
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Sheet 1: Itemized Ledger
-            df_ledger.to_excel(writer, index=False, sheet_name='Itemized_Ledger')
-            # Sheet 2: Dues Summary
-            df_dues.to_excel(writer, index=False, sheet_name='Dues_Summary')
+            pd.DataFrame(export_ledger).to_excel(writer, index=False, sheet_name='Itemized_Ledger')
+            pd.DataFrame(export_dues).to_excel(writer, index=False, sheet_name='Dues_Summary')
         return output.getvalue()
 
-    st.download_button(
-        "📥 Download Multi-Sheet Excel Report",
-        data=get_excel_file(),
-        file_name=f"Ledger_Report_{date.today()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
+    st.download_button("📥 Download Excel Report", data=to_excel(), file_name=f"Ledger_{date.today()}.xlsx", use_container_width=True)
